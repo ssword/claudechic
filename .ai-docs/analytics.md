@@ -36,7 +36,9 @@ All include `agent_id`.
 - `mcp_tool_used` - when Claude calls an MCP tool, includes `tool` (spawn_agent/spawn_worktree/ask_agent/tell_agent)
 
 ### Errors
-- `error_occurred` - on errors, includes `error_type`, `status_code`, `agent_id`
+- `error_occurred` - on errors, includes `error_type`, `context`, `status_code`, `agent_id`
+  - `context`: where the error occurred (`initial_connect`, `response`, `connection_lost`, `reconnect_failed`)
+  - `error_subtype`: for `CLIConnectionError`, a safe categorization (`cwd_not_found`, `not_ready`, `process_terminated`, `not_connected`, `start_failed`, `cli_not_found`, `unknown`)
 
 ## Design Decisions
 

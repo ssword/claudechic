@@ -93,6 +93,24 @@ from claudechic.sampling import start_sampler
 log = logging.getLogger(__name__)
 
 
+def _categorize_cli_error(e: CLIConnectionError) -> str:
+    """Categorize CLI connection error without exposing user paths."""
+    msg = str(e)
+    if "Working directory does not exist" in msg:
+        return "cwd_not_found"
+    if "not ready for writing" in msg:
+        return "not_ready"
+    if "terminated process" in msg:
+        return "process_terminated"
+    if "Not connected" in msg:
+        return "not_connected"
+    if "Failed to start" in msg:
+        return "start_failed"
+    if "not found" in msg.lower():
+        return "cli_not_found"
+    return "unknown"
+
+
 class ChatApp(App):
     """Main chat application.
 
@@ -625,6 +643,7 @@ class ChatApp(App):
             await capture(
                 "error_occurred",
                 error_type="CLIConnectionError",
+                error_subtype=_categorize_cli_error(e),
                 context="initial_connect",
             )
             self.exit(
