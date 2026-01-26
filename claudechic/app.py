@@ -52,7 +52,7 @@ from claudechic.features.worktree.commands import on_response_complete_finish
 from claudechic.permissions import PermissionRequest, PermissionResponse
 from claudechic.agent import Agent, ImageAttachment, ToolUse
 from claudechic.agent_manager import AgentManager
-from claudechic.analytics import capture, sanitize_error_message
+from claudechic.analytics import capture
 from claudechic.config import get_theme, set_theme, is_new_install
 from claudechic.enums import AgentStatus, PermissionChoice, ToolName
 from claudechic.mcp import set_app, create_chic_server
@@ -625,7 +625,6 @@ class ChatApp(App):
             await capture(
                 "error_occurred",
                 error_type="CLIConnectionError",
-                error_message=sanitize_error_message(str(e)),
                 context="initial_connect",
             )
             self.exit(
@@ -1943,9 +1942,6 @@ class ChatApp(App):
             capture(
                 "error_occurred",
                 error_type=error_type,
-                error_message=sanitize_error_message(str(exception))
-                if exception
-                else "",
                 context="response",
                 status_code=status_code,
                 agent_id=agent.analytics_id,
@@ -1980,7 +1976,6 @@ class ChatApp(App):
             await capture(
                 "error_occurred",
                 error_type=type(e).__name__,
-                error_message=sanitize_error_message(str(e)),
                 context="reconnect_failed",
                 agent_id=agent.analytics_id,
             )
