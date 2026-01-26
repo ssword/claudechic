@@ -222,7 +222,41 @@ def handle_command(app: "ChatApp", prompt: str) -> bool:
         app._toggle_diff_mode(target)
         return True
 
-    return False
+    # Unknown slash command - all /commands reach here if not matched above
+    return _handle_unknown_command(app, cmd)
+
+
+# Commands that exist in Claude Code CLI but not in claudechic
+CLAUDE_CLI_COMMANDS = frozenset(
+    {
+        "/mcp",
+        "/plugins",
+        "/login",
+        "/logout",
+        "/config",
+        "/permissions",
+        "/memory",
+        "/doctor",
+        "/cost",
+        "/terminal-setup",
+    }
+)
+
+
+def _handle_unknown_command(app: "ChatApp", cmd: str) -> bool:
+    """Handle unknown slash commands with helpful error messages."""
+    # Extract command name (first word)
+    cmd_name = cmd.split()[0]
+
+    if cmd_name in CLAUDE_CLI_COMMANDS:
+        app.notify(
+            f"'{cmd_name}' is not available in claudechic.\nUse 'claude' CLI instead.",
+            severity="warning",
+            timeout=5,
+        )
+    else:
+        app.notify(f"Unknown command: {cmd_name}.\nType /help for available commands.")
+    return True
 
 
 def _handle_resume(app: "ChatApp", command: str) -> bool:
