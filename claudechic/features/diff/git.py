@@ -84,6 +84,12 @@ class FileStat:
     untracked: bool = False
 
 
+# Skip untracked files if there are more than this many
+MAX_UNTRACKED_FILES = 4
+# Skip reading contents of untracked files larger than this
+MAX_UNTRACKED_FILE_SIZE = 1024
+
+
 async def get_file_stats(cwd: str, target: str = "HEAD") -> list[FileStat]:
     """Get file stats (additions/deletions) for tracked changes and untracked files."""
     stats = []
@@ -127,14 +133,22 @@ async def get_file_stats(cwd: str, target: str = "HEAD") -> list[FileStat]:
     )
     stdout, _ = await proc.communicate()
     if proc.returncode == 0:
-        for line in stdout.decode().strip().split("\n"):
-            if line and line not in seen_paths:
-                # New file - count lines as additions
+        untracked = [
+            line
+            for line in stdout.decode().strip().split("\n")
+            if line and line not in seen_paths
+        ]
+        # Skip all untracked files if too many
+        if len(untracked) <= MAX_UNTRACKED_FILES:
+            for line in untracked:
+                file_path = Path(cwd, line)
+                line_count = 0
                 try:
-                    content = Path(cwd, line).read_text()
-                    line_count = len(content.splitlines())
+                    # Only read small files
+                    if file_path.stat().st_size <= MAX_UNTRACKED_FILE_SIZE:
+                        line_count = len(file_path.read_text().splitlines())
                 except (OSError, UnicodeDecodeError):
-                    line_count = 0
+                    pass
                 stats.append(
                     FileStat(
                         path=line, additions=line_count, deletions=0, untracked=True
@@ -196,25 +210,38 @@ async def get_changes(cwd: str, target: str = "HEAD") -> list[FileChange]:
 
     if proc.returncode == 0:
         tracked_paths = {f.path for f in files}
-        for line in stdout.decode().strip().split("\n"):
-            if line and line not in tracked_paths:
-                # Read file content and create synthetic diff
+        untracked = [
+            line
+            for line in stdout.decode().strip().split("\n")
+            if line and line not in tracked_paths
+        ]
+        # Skip all untracked files if too many
+        if len(untracked) <= MAX_UNTRACKED_FILES:
+            for line in untracked:
+                file_path = Path(cwd, line)
                 try:
-                    content = Path(cwd, line).read_text()
-                    lines = content.splitlines()
-                    hunk = Hunk(
-                        old_start=0,
-                        old_count=0,
-                        new_start=1,
-                        new_count=len(lines),
-                        old_lines=[],
-                        new_lines=lines,
-                    )
-                    files.append(
-                        FileChange(path=line, status="untracked", hunks=[hunk])
-                    )
+                    # Only read small files for synthetic diff
+                    if file_path.stat().st_size <= MAX_UNTRACKED_FILE_SIZE:
+                        content = file_path.read_text()
+                        lines = content.splitlines()
+                        hunk = Hunk(
+                            old_start=0,
+                            old_count=0,
+                            new_start=1,
+                            new_count=len(lines),
+                            old_lines=[],
+                            new_lines=lines,
+                        )
+                        files.append(
+                            FileChange(path=line, status="untracked", hunks=[hunk])
+                        )
+                    else:
+                        # Large file - include but without diff content
+                        files.append(
+                            FileChange(path=line, status="untracked", hunks=[])
+                        )
                 except (OSError, UnicodeDecodeError):
-                    # Skip binary or unreadable files
+                    # Binary or unreadable - include but without diff content
                     files.append(FileChange(path=line, status="untracked", hunks=[]))
 
     return files
