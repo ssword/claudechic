@@ -12,6 +12,7 @@ Exposes tools for Claude to manage agents within claudechic:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,7 @@ from claude_agent_sdk import tool, create_sdk_mcp_server
 
 from claudechic.analytics import capture
 from claudechic.features.worktree.git import start_worktree
+from claudechic.tasks import create_safe_task
 
 if TYPE_CHECKING:
     from claudechic.app import ChatApp
@@ -63,14 +65,45 @@ def _track_mcp_tool(tool_name: str) -> None:
         )
 
 
-async def _send_prompt_to_agent(agent, prompt: str) -> None:
-    """Send prompt directly to agent without switching UI.
+def _send_prompt_fire_and_forget(
+    agent,
+    prompt: str,
+    *,
+    caller_name: str | None = None,
+    expect_reply: bool = False,
+    is_spawn: bool = False,
+) -> None:
+    """Fire-and-forget prompt send that doesn't block MCP handlers.
 
-    Uses Agent.send() for concurrent operation.
+    MCP handlers have implicit timeouts - awaiting SDK operations like
+    agent.send() can cause "stream closed" errors. This function schedules
+    the send as a background task and returns immediately.
+
+    Args:
+        agent: The agent to send to
+        prompt: The message to send
+        caller_name: If set, wraps prompt with sender info
+        expect_reply: If True (with caller_name), adds reply instructions
+        is_spawn: If True (with caller_name), uses "Spawned by" prefix
     """
-    if agent.client is None:
-        raise RuntimeError(f"Agent '{agent.name}' not connected")
-    await agent.send(prompt)
+    # Wrap prompt with caller info if provided
+    if caller_name:
+        if expect_reply:
+            prompt = f"[Question from agent '{caller_name}' - please respond back using tell_agent, or ask_agent if you need more context]\n\n{prompt}"
+        elif is_spawn:
+            prompt = f"[Spawned by agent '{caller_name}']\n\n{prompt}"
+        else:
+            prompt = f"[Message from agent '{caller_name}']\n\n{prompt}"
+
+    async def do_send():
+        if agent.client is None:
+            log.warning(f"Agent '{agent.name}' not connected, skipping prompt")
+            return
+        await agent.send(prompt)
+
+    # Use monotonic_ns for unique task names (helps debugging concurrent sends)
+    task_id = time.monotonic_ns()
+    create_safe_task(do_send(), name=f"send-prompt-{agent.name}-{task_id}")
 
 
 def _make_spawn_agent(caller_name: str | None = None):
@@ -109,14 +142,10 @@ def _make_spawn_agent(caller_name: str | None = None):
         result = f"Created agent '{name}' in {path}"
 
         if prompt:
-            # Wrap prompt with spawner info
-            if caller_name:
-                prompt = f"[Spawned by agent '{caller_name}']\n\n{prompt}"
-            try:
-                await _send_prompt_to_agent(agent, prompt)
-                result += f"\nSent initial prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}"
-            except Exception as e:
-                result += f"\nWarning: Failed to send prompt: {e}"
+            _send_prompt_fire_and_forget(
+                agent, prompt, caller_name=caller_name, is_spawn=True
+            )
+            result += f"\nQueued initial prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}"
 
         return _text_response(result)
 
@@ -158,14 +187,10 @@ def _make_spawn_worktree(caller_name: str | None = None):
         result = f"Created worktree '{name}' at {wt_path} with new agent"
 
         if prompt:
-            # Wrap prompt with spawner info
-            if caller_name:
-                prompt = f"[Spawned by agent '{caller_name}']\n\n{prompt}"
-            try:
-                await _send_prompt_to_agent(agent, prompt)
-                result += f"\nSent initial prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}"
-            except Exception as e:
-                result += f"\nWarning: Failed to send prompt: {e}"
+            _send_prompt_fire_and_forget(
+                agent, prompt, caller_name=caller_name, is_spawn=True
+            )
+            result += f"\nQueued initial prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}"
 
         return _text_response(result)
 
@@ -193,17 +218,12 @@ def _make_ask_agent(caller_name: str | None = None):
         if agent is None:
             return _text_response(f"Error: {error}")
 
-        # Wrap prompt with caller info and reply expectation
-        if caller_name:
-            prompt = f"[Question from agent '{caller_name}' - please respond back using tell_agent, or ask_agent if you need more context]\n\n{prompt}"
-
-        try:
-            await _send_prompt_to_agent(agent, prompt)
-        except Exception as e:
-            return _text_response(f"Error: {e}")
+        _send_prompt_fire_and_forget(
+            agent, prompt, caller_name=caller_name, expect_reply=True
+        )
 
         return _text_response(
-            f"Question sent to '{name}'. They will respond when ready."
+            f"Question queued for '{name}'. Delivery is asynchronous - the message may not arrive if the agent is disconnected."
         )
 
     return ask_agent
@@ -230,16 +250,9 @@ def _make_tell_agent(caller_name: str | None = None):
         if agent is None:
             return _text_response(f"Error: {error}")
 
-        # Wrap message with caller info (no reply expectation)
-        if caller_name:
-            message = f"[Message from agent '{caller_name}']\n\n{message}"
+        _send_prompt_fire_and_forget(agent, message, caller_name=caller_name)
 
-        try:
-            await _send_prompt_to_agent(agent, message)
-        except Exception as e:
-            return _text_response(f"Error: {e}")
-
-        return _text_response(f"Message sent to '{name}'.")
+        return _text_response(f"Message queued for '{name}'. Delivery is asynchronous.")
 
     return tell_agent
 
