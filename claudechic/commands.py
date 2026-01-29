@@ -277,21 +277,21 @@ def handle_command(app: "ChatApp", prompt: str) -> bool:
 
 
 def _is_user_command(cmd_name: str, cwd: Path) -> bool:
-    """Check if cmd_name is a user-defined command in ~/.claude/commands/ or .claude/commands/."""
-    # Strip leading slash: /cleanup -> cleanup
+    """Check if cmd_name is a user-defined command or skill.
+
+    Commands: ~/.claude/commands/<name>.md or .claude/commands/<name>.md
+    Skills: ~/.claude/skills/<name>/SKILL.md or .claude/skills/<name>/SKILL.md
+    """
     name = cmd_name.lstrip("/")
+    home = Path.home()
 
-    # Check global commands
-    global_commands = Path.home() / ".claude" / "commands"
-    if (global_commands / f"{name}.md").exists():
-        return True
-
-    # Check project commands
-    project_commands = cwd / ".claude" / "commands"
-    if (project_commands / f"{name}.md").exists():
-        return True
-
-    return False
+    paths = [
+        home / ".claude" / "commands" / f"{name}.md",  # global command
+        cwd / ".claude" / "commands" / f"{name}.md",  # project command
+        home / ".claude" / "skills" / name / "SKILL.md",  # global skill
+        cwd / ".claude" / "skills" / name / "SKILL.md",  # project skill
+    ]
+    return any(p.exists() for p in paths)
 
 
 # Commands that exist in Claude Code CLI but not in claudechic
