@@ -126,10 +126,10 @@ class HamburgerButton(Button):
     DEFAULT_CSS = """
     HamburgerButton {
         layer: above;
-        width: 10;
+        width: 16;
         height: 3;
         content-align: center middle;
-        background: $surface;
+        background: $panel;
         color: $text-muted;
         display: none;
         /* Position top-right */
@@ -153,7 +153,7 @@ class HamburgerButton(Button):
         super().__init__(id=id)
 
     def render(self) -> str:
-        return "Agents"
+        return "Open Sidebar"
 
     def on_click(self, event) -> None:
         self.post_message(self.SidebarToggled())
