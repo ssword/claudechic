@@ -778,27 +778,47 @@ class ChatApp(App):
                     self._update_footer_model(agent.model if agent else None)
         except Exception as e:
             log.warning(f"Failed to fetch SDK commands: {e}")
-        self._refresh_autocomplete_agents()
+        self._refresh_dynamic_completions()
         self.refresh_context()
 
-    def _refresh_autocomplete_agents(self) -> None:
-        """Refresh autocomplete with current agent names."""
+    def _refresh_dynamic_completions(self) -> None:
+        """Refresh autocomplete with current agents and worktrees."""
         autocomplete = self.query_one_optional(TextAreaAutoComplete)
         if not autocomplete:
             return
-        # Get current commands (may include SDK commands)
+
+        # Start from current commands (may include SDK commands)
         base = (
             list(autocomplete.slash_commands)
             if autocomplete.slash_commands
             else list(self.LOCAL_COMMANDS)
         )
-        # Remove old agent completions
-        base = [c for c in base if not c.startswith("/agent ")]
-        # Add current agent names
+
+        # Remove old dynamic completions (keep static worktree commands)
+        static_worktree = {"/worktree finish", "/worktree cleanup"}
+        base = [
+            c
+            for c in base
+            if not c.startswith("/agent ")
+            and (not c.startswith("/worktree ") or c in static_worktree)
+        ]
+
+        # Add current agents
         if self.agent_mgr:
             for agent in self.agent_mgr.agents.values():
                 base.append(f"/agent {agent.name}")
                 base.append(f"/agent close {agent.name}")
+
+        # Add current worktrees
+        try:
+            from claudechic.features.worktree import list_worktrees
+
+            for wt in list_worktrees():
+                if not wt.is_main:
+                    base.append(f"/worktree {wt.branch}")
+        except Exception:
+            pass  # Not a git repo or git not available
+
         autocomplete.slash_commands = base
 
     @work(exclusive=True, group="file_index")
@@ -2039,6 +2059,9 @@ class ChatApp(App):
 
             # Populate files section with uncommitted changes
             create_safe_task(self._async_refresh_files(agent), name="refresh-files")
+
+            # Refresh autocomplete with new agent
+            self._refresh_dynamic_completions()
         except Exception as e:
             log.exception(f"Failed to create agent UI: {e}")
 
@@ -2123,6 +2146,9 @@ class ChatApp(App):
         except Exception:
             pass
         self._position_right_sidebar()
+
+        # Refresh autocomplete after agent closed
+        self._refresh_dynamic_completions()
 
     def on_status_changed(self, agent: Agent) -> None:
         """Handle agent status change."""

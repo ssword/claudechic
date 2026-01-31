@@ -30,8 +30,8 @@ async def test_slash_command_autocomplete(mock_sdk, tmp_path: Path):
         input_widget.text = "/worktree"
         await pilot.pause()
 
-        # Should show worktree commands (base, finish, cleanup)
-        assert autocomplete.option_list.option_count == 3
+        # Should show worktree commands (base, finish, cleanup, plus any worktree branches)
+        assert autocomplete.option_list.option_count >= 3
 
         # Type even more to narrow to just one
         input_widget.text = "/worktree f"
