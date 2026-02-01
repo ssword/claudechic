@@ -54,10 +54,29 @@ CHIC_LIGHT_THEME = Theme(
 )
 
 
+# Fields that custom themes can override
+_THEME_FIELDS = (
+    "primary",
+    "secondary",
+    "warning",
+    "error",
+    "success",
+    "accent",
+    "foreground",
+    "background",
+    "surface",
+    "panel",
+    "boost",
+    "dark",
+)
+_CHIC_DEFAULTS = {f: getattr(CHIC_THEME, f) for f in _THEME_FIELDS}
+
+
 def load_custom_themes() -> list[Theme]:
     """Load custom themes from config file.
 
     Returns list of Theme objects defined in ~/.claude/.claudechic.yaml
+    Missing values inherit from CHIC_THEME defaults.
     """
     themes_config = CONFIG.get("themes", {})
     custom_themes = []
@@ -65,11 +84,7 @@ def load_custom_themes() -> list[Theme]:
     for name, colors in themes_config.items():
         if not isinstance(colors, dict):
             continue
-
-        theme = Theme(
-            name=name,
-            **colors,
-        )
+        theme = Theme(name=name, **{**_CHIC_DEFAULTS, **colors})
         custom_themes.append(theme)
 
     return custom_themes
