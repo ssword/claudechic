@@ -1781,6 +1781,8 @@ class ChatApp(App):
         if result and result != agent.model:
             self._set_agent_model(result)
 
+    # exclusive=False allows parallel agent creation (needed for plan-swarm).
+    # Race on switch_to is acceptable - last created wins for active agent.
     @work(group="new_agent", exclusive=False, exit_on_error=False)
     async def _create_new_agent(
         self,
