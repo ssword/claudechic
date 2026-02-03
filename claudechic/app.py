@@ -1399,10 +1399,9 @@ class ChatApp(App):
         duration = time.time() - getattr(self, "_app_start_time", time.time())
         await capture("app_closed", duration_seconds=int(duration), end_reason=reason)
 
-        # Windows-specific cleanup: allow asyncio transports to be garbage collected
-        # while the event loop is still running. Without this, Python's ProactorEventLoop
-        # transport __del__ methods fail trying to format warnings about "unclosed transport"
-        # because the pipes are already closed. See issue #31.
+        # Windows-specific cleanup: give asyncio transports time to be garbage collected
+        # while the event loop is still running. The unraisablehook in __main__.py
+        # handles suppressing any remaining __del__ exceptions. See issue #31.
         if sys.platform == "win32":
             import gc
 
