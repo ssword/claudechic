@@ -3,7 +3,6 @@
 import argparse
 import os
 import sys
-import warnings
 from importlib.metadata import version
 
 from claudechic.app import ChatApp
@@ -11,31 +10,6 @@ from claudechic.errors import setup_logging
 
 # Set up file logging to ~/claudechic.log
 setup_logging()
-
-# Suppress Windows asyncio transport exceptions on exit (issue #31)
-# ProactorEventLoop transport __del__ methods try to warn about "unclosed transport"
-# but fail because pipes are already closed, causing ValueError in __repr__.
-# We suppress both the warnings and the unraisable exceptions from __del__.
-if sys.platform == "win32":
-    warnings.filterwarnings(
-        "ignore", message="unclosed transport", category=ResourceWarning
-    )
-
-    # Store original hook to chain for non-transport exceptions
-    _original_unraisablehook = sys.unraisablehook
-
-    def _suppress_transport_exceptions(unraisable: sys.UnraisableHookArgs) -> None:
-        """Suppress ValueError from asyncio transport __del__ on Windows."""
-        # Only suppress the specific transport cleanup errors
-        if unraisable.exc_type is ValueError and unraisable.object is not None:
-            obj_type = type(unraisable.object).__name__
-            if "Transport" in obj_type:
-                return  # Silently ignore transport cleanup errors
-        # For other unraisable exceptions, use the original hook
-        if _original_unraisablehook is not None:
-            _original_unraisablehook(unraisable)
-
-    sys.unraisablehook = _suppress_transport_exceptions
 
 
 def main():
@@ -101,6 +75,12 @@ def main():
         # Print standard traceback (not rich's fancy one) and exit
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        # Windows: suppress stderr during interpreter shutdown to silence asyncio
+        # transport __del__ exceptions (ValueError from closed pipes). See issue #31.
+        # This must happen after app.run() returns but before Python garbage collects.
+        if sys.platform == "win32":
+            sys.stderr = open(os.devnull, "w")
 
 
 if __name__ == "__main__":

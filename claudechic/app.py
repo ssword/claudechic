@@ -1399,17 +1399,9 @@ class ChatApp(App):
         duration = time.time() - getattr(self, "_app_start_time", time.time())
         await capture("app_closed", duration_seconds=int(duration), end_reason=reason)
 
-        # Windows-specific cleanup: give asyncio transports time to be garbage collected
-        # while the event loop is still running. The unraisablehook in __main__.py
-        # handles suppressing any remaining __del__ exceptions. See issue #31.
-        if sys.platform == "win32":
-            import gc
-
-            await asyncio.sleep(0.1)  # Let event loop process pending callbacks
-            gc.collect()  # Clean up transport references
-            await asyncio.sleep(0.1)  # Let any finalizers run
-
-        # Suppress SDK stderr noise during exit (stream closed errors)
+        # Suppress SDK stderr noise during exit (stream closed errors on all platforms)
+        # Note: Windows transport __del__ exceptions need additional stderr redirect
+        # in __main__.py's finally block (after Textual exits). See issue #31.
         sys.stderr = open(os.devnull, "w")
         self.exit()
 
