@@ -205,6 +205,9 @@ class Agent:
         # Pending plan execution (set when "clear context + auto-approve" chosen)
         self.pending_plan_execution: dict | None = None  # {"plan": str, "mode": str}
 
+        # Checkpoint tracking for /rewind command (UUIDs of user messages)
+        self.checkpoint_uuids: list[str] = []
+
     @property
     def analytics_id(self) -> str:
         """ID for analytics events (session_id if connected, else internal id)."""
@@ -306,6 +309,7 @@ class Agent:
             return
 
         self.messages.clear()
+        self.checkpoint_uuids.clear()  # Clear stale UUIDs; SDK will repopulate via replay
         raw_messages = await load_session_messages(self.session_id, cwd=cwd or self.cwd)
 
         current_assistant: AssistantContent | None = None
@@ -541,6 +545,10 @@ Key Rules:
                     self._handle_tool_result(block)
 
         elif isinstance(message, UserMessage):
+            # Capture UUID for checkpoints (needed for /rewind file restoration)
+            if message.uuid:
+                self.checkpoint_uuids.append(message.uuid)
+
             # UserMessage can contain tool results or command output
             content = getattr(message, "content", "")
             if isinstance(content, str):

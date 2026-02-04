@@ -642,6 +642,8 @@ class ChatApp(App):
             include_partial_messages=True,
             stderr=self._handle_sdk_stderr,
             hooks=self._plan_mode_hooks(),
+            enable_file_checkpointing=True,
+            extra_args={"replay-user-messages": None},
         )
 
     async def on_mount(self) -> None:
@@ -1560,6 +1562,122 @@ class ChatApp(App):
         # Use current agent's cwd so sessions are filtered by the agent's project
         cwd = self._agent.cwd if self._agent else None
         self.push_screen(SessionScreen(cwd=cwd), on_dismiss)
+
+    def _show_rewind_picker(self) -> None:
+        """Show the rewind checkpoint picker screen."""
+        from claudechic.screens import RewindScreen
+
+        agent = self._agent
+        if not agent:
+            self.notify("No active agent", severity="error")
+            return
+
+        def on_dismiss(result: tuple[int, str] | None) -> None:
+            if result:
+                checkpoint_idx, rewind_type = result
+                self.run_worker(self._do_rewind(checkpoint_idx, rewind_type))
+            self.chat_input.focus()
+
+        self.push_screen(RewindScreen(agent), on_dismiss)
+
+    def _rewind_to_checkpoint_direct(self, index: int) -> None:
+        """Directly rewind to a checkpoint index (defaults to 'both')."""
+        self.run_worker(self._do_rewind(index, "both"))
+
+    async def _do_rewind(self, checkpoint_idx: int, rewind_type: str) -> None:
+        """Execute the rewind operation.
+
+        Args:
+            checkpoint_idx: The checkpoint index to rewind to
+            rewind_type: One of "conversation", "code", or "both"
+        """
+        from claudechic.checkpoints import get_checkpoints
+        from claudechic.enums import AgentStatus
+
+        agent = self._agent
+        if not agent or not agent.client:
+            self.notify("No active agent", severity="error")
+            return
+
+        # Prevent rewind while agent is processing (mutating messages could cause race conditions)
+        if agent.status != AgentStatus.IDLE:
+            self.notify("Cannot rewind while agent is busy", severity="warning")
+            return
+
+        checkpoints = get_checkpoints(agent)
+        if not checkpoints:
+            self.notify("No checkpoints available", severity="warning")
+            return
+        if checkpoint_idx < 0 or checkpoint_idx >= len(checkpoints):
+            self.notify(
+                f"Invalid checkpoint {checkpoint_idx}. Valid: 0-{len(checkpoints) - 1}",
+                severity="error",
+            )
+            return
+
+        checkpoint = checkpoints[checkpoint_idx]
+        rewound_files = False
+        rewound_conversation = False
+
+        if rewind_type in ("code", "both"):
+            # Revert files using SDK
+            if checkpoint.uuid:
+                try:
+                    await agent.client.rewind_files(checkpoint.uuid)
+                    rewound_files = True
+                except Exception as e:
+                    log.exception("Failed to rewind files")
+                    self.notify(f"Failed to rewind files: {e}", severity="error")
+                    if rewind_type == "code":
+                        return
+            else:
+                self.notify(
+                    "No UUID for checkpoint - file rewind not available",
+                    severity="warning",
+                )
+                if rewind_type == "code":
+                    return
+
+        if rewind_type in ("conversation", "both"):
+            # Truncate messages to checkpoint
+            # Find the index in agent.messages for this checkpoint's user message,
+            # then include all assistant messages until the next user message
+            user_msg_count = 0
+            checkpoint_user_idx = 0
+            for i, item in enumerate(agent.messages):
+                if item.role == "user":
+                    if user_msg_count == checkpoint_idx:
+                        checkpoint_user_idx = i
+                        break
+                    user_msg_count += 1
+
+            # Now find where to truncate: after all assistant messages following this user
+            truncate_at = checkpoint_user_idx + 1
+            for i in range(checkpoint_user_idx + 1, len(agent.messages)):
+                if agent.messages[i].role == "user":
+                    # Found next user message - stop before it
+                    break
+                truncate_at = i + 1  # Include this assistant message
+
+            agent.messages = agent.messages[:truncate_at]
+            agent.checkpoint_uuids = agent.checkpoint_uuids[: checkpoint_idx + 1]
+
+            # Re-render chat view
+            chat_view = self._chat_view
+            if chat_view:
+                chat_view._render_full()
+
+            rewound_conversation = True
+
+        # Single combined notification
+        if rewound_files and rewound_conversation:
+            self.notify(
+                f"Rewound to checkpoint #{checkpoint_idx} (files + conversation)"
+            )
+        elif rewound_files:
+            self.notify(f"Rewound files to checkpoint #{checkpoint_idx}")
+        elif rewound_conversation:
+            self.notify(f"Rewound conversation to checkpoint #{checkpoint_idx}")
 
     @work(group="reconnect", exclusive=True, exit_on_error=False)
     async def _reconnect_sdk(self, new_cwd: Path) -> None:

@@ -105,6 +105,7 @@ COMMANDS: list[tuple[str, str, list[str]]] = [
     ("/welcome", "Show welcome message", []),
     ("/reviewer", "Spawn a review agent for current changes", []),
     ("/plan-swarm", "Start swarm planning with multiple approaches", []),
+    ("/rewind", "Rewind to a previous checkpoint", []),
     ("/help", "Show help", []),
     ("/exit", "Quit", []),
     ("!<cmd>", "Shell command alias", []),
@@ -144,6 +145,8 @@ def get_help_commands() -> list[tuple[str, str]]:
             display_name = "/reviewer [focus]"
         elif name == "/plan-swarm":
             display_name = "/plan-swarm"
+        elif name == "/rewind":
+            display_name = "/rewind [index]"
         result.append((display_name, desc))
     return result
 
@@ -278,6 +281,10 @@ def handle_command(app: "ChatApp", prompt: str) -> bool:
         app._toggle_diff_mode(target)
         return True
 
+    if cmd == "/rewind" or cmd.startswith("/rewind "):
+        _track_command(app, "rewind")
+        return _handle_rewind(app, cmd)
+
     # Unknown slash command - pass through to Claude (may be SDK command or skill)
     cmd_name = cmd.split()[0]
     if cmd_name in CLAUDE_CLI_COMMANDS:
@@ -379,6 +386,27 @@ def _handle_resume(app: "ChatApp", command: str) -> bool:
         app.resume_session(session_id)
     else:
         app._show_session_picker()
+    return True
+
+
+def _handle_rewind(app: "ChatApp", command: str) -> bool:
+    """Handle /rewind [checkpoint_index] command.
+
+    Without argument: shows checkpoint picker UI
+    With index: directly rewinds to that checkpoint (prompts for type)
+    """
+    parts = command.split(maxsplit=1)
+
+    if len(parts) > 1:
+        # Direct rewind: /rewind 3
+        try:
+            index = int(parts[1])
+            app._rewind_to_checkpoint_direct(index)
+        except ValueError:
+            app.notify(f"Invalid checkpoint index: {parts[1]}", severity="error")
+    else:
+        # Show picker
+        app._show_rewind_picker()
     return True
 
 
@@ -773,7 +801,9 @@ async def _list_reviews_in_chat(app: "ChatApp") -> None:
         verdict = _format_verdict(r.verdict)
         sha = r.git_ref[:7] if r.git_ref else ""
         subject = r.commit_subject[:30] + ("…" if len(r.commit_subject) > 30 else "")
-        lines.append(f"| {r.id} | {verdict} | `{sha}` | {subject} | {r.agent} | {r.status} |")
+        lines.append(
+            f"| {r.id} | {verdict} | `{sha}` | {subject} | {r.agent} | {r.status} |"
+        )
     lines.append("\nUse `/reviews <job_id>` to see detail.")
 
     msg = ChatMessage("\n".join(lines))
