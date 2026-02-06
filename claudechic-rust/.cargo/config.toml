@@ -1,0 +1,6 @@
+[build]
+rustflags = ["-C", "target-cpu=native"]
+
+[alias]
+dev = "build --profile=dev"
+rel = "build --profile=release"
