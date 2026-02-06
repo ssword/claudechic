@@ -23,3 +23,4 @@ uv.lock
 
 # Marimo cache
 __marimo__/
+.env
